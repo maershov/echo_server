@@ -16,20 +16,21 @@ int main()
 {
     int listener;
     struct sockaddr_in addr;
-    char buf[1024];
-    int bytes_read;
+    char buffer[1024];
+    int byte_reader;
 
     listener = socket(AF_INET, SOCK_STREAM, 0);
     if(listener < 0)
     {
-        perror("socket");
+        perror("my socket");
         exit(1);
     }
 
     fcntl(listener, F_SETFL, O_NONBLOCK);
 
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(1924);
+    //устанавливаем порт, на котором будет работать наш "чат" с бродкаст запросом
+    addr.sin_port = htons(5000);
     addr.sin_addr.s_addr = INADDR_ANY;
     if(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) < 0)
     {
@@ -39,36 +40,36 @@ int main()
 
     listen(listener, 2);
 
-    set<int> clients;
-    clients.clear();
+    set<int> my_clients;
+    my_clients.clear();
 
     while(1)
     {
-// Заполняем множество сокетов
-        fd_set readset;
-        FD_ZERO(&readset);
-        FD_SET(listener, &readset);
+        // Заполняем сокеты
+        fd_set my_set_read;
+        FD_ZERO(&my_set_read);
+        FD_SET(listener, &my_set_read);
 
-        for(set<int>::iterator it = clients.begin(); it != clients.end(); it++)
-            FD_SET(*it, &readset);
+        for(set<int>::iterator it = my_clients.begin(); it != my_clients.end(); it++)
+            FD_SET(*it, &my_set_read);
 
-// Задаём таймаут
+        // Ставим таймаут сколько висит соединение
         timeval timeout;
-        timeout.tv_sec = 15;
+        timeout.tv_sec = 60;
         timeout.tv_usec = 0;
 
-// Ждём события в одном из сокетов
-        int mx = max(listener, clients.begin(, clients.end()));
-        if(select(mx+1, &readset, NULL, NULL, &timeout) <= 0)
+        // Событие в сокете которое ожидаем
+        int mx = max(listener, *max_element(my_clients.begin(), my_clients.end()));
+        if(select(mx+1, &my_set_read, NULL, NULL, &timeout) <= 0)
         {
             perror("select");
             exit(3);
         }
 
-// Определяем тип события и выполняем соответствующие действия
-        if(FD_ISSET(listener, &readset))
+        //Выполняем действие
+        if(FD_ISSET(listener, &my_set_read))
         {
-// Поступил новый запрос на соединение, используем accept
+            // Запрос на соединение
             int sock = accept(listener, NULL, NULL);
             if(sock < 0)
             {
@@ -78,26 +79,29 @@ int main()
 
             fcntl(sock, F_SETFL, O_NONBLOCK);
 
-            clients.insert(sock);
+            my_clients.insert(sock);
         }
 
-        for(set<int>::iterator it = clients.begin(); it != clients.end(); it++)
+        for(set<int>::iterator it = my_clients.begin(); it != my_clients.end(); it++)
         {
-            if(FD_ISSET(*it, &readset))
+            if(FD_ISSET(*it, &my_set_read))
             {
-// Поступили данные от клиента, читаем их
-                bytes_read = recv(*it, buf, 1024, 0);
+                // Берем данные и читаем их
+                byte_reader = recv(*it, buffer, 1024, 0);
 
-                if(bytes_read <= 0)
+                if(byte_reader <= 0)
                 {
-// Соединение разорвано, удаляем сокет из множества
+                    // Удаляем из сета когда соединение разорвано
                     close(*it);
-                    clients.erase(*it);
+                    my_clients.erase(*it);
                     continue;
                 }
 
-// Отправляем данные обратно клиенту
-                send(*it, buf, bytes_read, 0);
+                // Отправим данные всем клиентам
+                for(set<int>::iterator it = my_clients.begin(); it != my_clients.end(); it++){
+                    send(*it, buffer, byte_reader, 0);
+
+                }
             }
         }
     }
